@@ -1,0 +1,275 @@
+{
+  "info": {
+    "name": "Petstore CRUD Regression",
+    "description": "CRUD regression for Swagger Petstore v3: Create -> Get -> Update -> Get -> Delete -> Verify deletion.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Create pet",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Unique test data for every run, so parallel runs on the public demo API don't collide",
+              "const id = Math.floor(Date.now() / 1000) * 1000 + Math.floor(Math.random() * 1000);",
+              "pm.collectionVariables.set(\"petId\", id);",
+              "pm.collectionVariables.set(\"petName\", \"ai-regression-\" + id);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Create: status code is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Create: response is JSON\", () => pm.response.to.be.json);",
+              "const body = pm.response.json();",
+              "pm.test(\"Create: id matches the sent id\", () => pm.expect(body.id).to.eql(Number(pm.collectionVariables.get(\"petId\"))));",
+              "pm.test(\"Create: name matches the sent name\", () => pm.expect(body.name).to.eql(pm.collectionVariables.get(\"petName\")));",
+              "pm.test(\"Create: status is available\", () => pm.expect(body.status).to.eql(\"available\"));",
+              "pm.test(\"Create: photoUrls is a non-empty array\", () => pm.expect(body.photoUrls).to.be.an(\"array\").that.is.not.empty);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": {{petId}},\n  \"name\": \"{{petName}}\",\n  \"category\": {\n    \"id\": 1,\n    \"name\": \"Dogs\"\n  },\n  \"photoUrls\": [\n    \"https://example.org/pet.png\"\n  ],\n  \"tags\": [\n    {\n      \"id\": 1,\n      \"name\": \"ai-api-testing\"\n    }\n  ],\n  \"status\": \"available\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "2. Get pet after create",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Get after create: status code is 200\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"Get after create: same id\", () => pm.expect(body.id).to.eql(Number(pm.collectionVariables.get(\"petId\"))));",
+              "pm.test(\"Get after create: same name\", () => pm.expect(body.name).to.eql(pm.collectionVariables.get(\"petName\")));",
+              "pm.test(\"Get after create: status is available\", () => pm.expect(body.status).to.eql(\"available\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet/{{petId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet",
+            "{{petId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Update pet",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Update: status code is 200\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"Update: name changed\", () => pm.expect(body.name).to.eql(pm.collectionVariables.get(\"petName\") + \"-updated\"));",
+              "pm.test(\"Update: status changed to sold\", () => pm.expect(body.status).to.eql(\"sold\"));",
+              "pm.test(\"Update: id unchanged\", () => pm.expect(body.id).to.eql(Number(pm.collectionVariables.get(\"petId\"))));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": {{petId}},\n  \"name\": \"{{petName}}-updated\",\n  \"category\": {\n    \"id\": 1,\n    \"name\": \"Dogs\"\n  },\n  \"photoUrls\": [\n    \"https://example.org/pet.png\"\n  ],\n  \"tags\": [\n    {\n      \"id\": 1,\n      \"name\": \"ai-api-testing\"\n    }\n  ],\n  \"status\": \"sold\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "4. Get pet after update",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Get after update: status code is 200\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"Get after update: name is updated\", () => pm.expect(body.name).to.eql(pm.collectionVariables.get(\"petName\") + \"-updated\"));",
+              "pm.test(\"Get after update: status is sold\", () => pm.expect(body.status).to.eql(\"sold\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet/{{petId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet",
+            "{{petId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. Delete pet",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Delete: status code is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet/{{petId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet",
+            "{{petId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Verify deletion",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Verify deletion: status code is 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"Verify deletion: body says Pet not found\", () => pm.expect(pm.response.text()).to.include(\"Pet not found\"));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/pet/{{petId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "pet",
+            "{{petId}}"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://petstore3.swagger.io/api/v3"
+    },
+    {
+      "key": "petId",
+      "value": ""
+    },
+    {
+      "key": "petName",
+      "value": ""
+    }
+  ]
+}
