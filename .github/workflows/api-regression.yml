@@ -1,0 +1,144 @@
+name: API regression (Newman)
+
+on:
+  # Weekly: every Monday 07:00 UTC. Runs the regression only if Jira has
+  # tickets with label "api-testing" in status "Ready for QA".
+  schedule:
+    - cron: "0 7 * * 1"
+  # Manual run from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      check_jira:
+        description: "Run only if Jira has api-testing tickets in Ready for QA"
+        type: boolean
+        default: false
+  # Run on pull requests so changes to the collection are checked before merge.
+  pull_request:
+    paths:
+      - "collections/**"
+      - ".github/workflows/api-regression.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: api-regression-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  jira-gate:
+    name: Check Jira for api-testing tickets
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          CHECK_JIRA: ${{ inputs.check_jira }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          if [ "$EVENT" != "schedule" ] && [ "$CHECK_JIRA" != "true" ]; then
+            echo "Event '$EVENT' without Jira check: run regression."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$JIRA_BASE_URL" ] || [ -z "$JIRA_EMAIL" ] || [ -z "$JIRA_API_TOKEN" ]; then
+            echo "::error::Jira secrets JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN are not set."
+            exit 1
+          fi
+          JQL='labels = "api-testing" AND status = "Ready for QA"'
+          RESPONSE=$(curl -sS -f -G "${JIRA_BASE_URL%/}/rest/api/3/search/jql" \
+            -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H "Accept: application/json" \
+            --data-urlencode "jql=$JQL" --data-urlencode "fields=key,summary" \
+            --data-urlencode "maxResults=50")
+          COUNT=$(echo "$RESPONSE" | jq '.issues | length')
+          echo "Jira tickets matching [$JQL]: $COUNT"
+          echo "$RESPONSE" | jq -r '.issues[] | "- \(.key): \(.fields.summary)"'
+          {
+            echo "### Jira gate"
+            echo "JQL: \`$JQL\`"
+            echo "Tickets found: **$COUNT**"
+            echo "$RESPONSE" | jq -r '.issues[] | "- \(.key): \(.fields.summary)"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No tickets ready for API testing: regression skipped." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  regression:
+    name: Run Newman regression
+    needs: jira-gate
+    if: needs.jira-gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Newman and HTML reporter
+        run: npm install -g newman@6 newman-reporter-htmlextra@1
+
+      - name: Run collection
+        id: newman
+        continue-on-error: true
+        run: |
+          mkdir -p report
+          newman run collections/petstore-crud.postman_collection.json \
+            --reporters cli,htmlextra,json \
+            --reporter-htmlextra-export report/index.html \
+            --reporter-htmlextra-title "Petstore CRUD regression #${{ github.run_number }}" \
+            --reporter-json-export report/summary.json
+
+      - name: Write assertion summary
+        if: always()
+        run: |
+          TOTAL=$(jq '.run.stats.assertions.total' report/summary.json)
+          FAILED=$(jq '.run.stats.assertions.failed' report/summary.json)
+          {
+            echo "### Newman result"
+            echo "| Assertions | Passed | Failed |"
+            echo "|---|---|---|"
+            echo "| $TOTAL | $((TOTAL - FAILED)) | $FAILED |"
+            echo ""
+            echo "Report: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/runs/${{ github.run_number }}/"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report-${{ github.run_number }}
+          path: report/
+
+      - name: Prepare Pages content
+        if: always() && github.event_name != 'pull_request'
+        run: |
+          mkdir -p site/runs/${{ github.run_number }} site/latest
+          cp report/index.html site/runs/${{ github.run_number }}/index.html
+          cp report/index.html site/latest/index.html
+          cat > site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=latest/">
+          <title>Petstore API regression</title><a href="latest/">Latest report</a>
+          EOF
+
+      - name: Publish report to GitHub Pages
+        if: always() && github.event_name != 'pull_request'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site
+          keep_files: true
+
+      - name: Fail the job if any assertion failed
+        if: steps.newman.outcome == 'failure'
+        run: |
+          echo "::error::Newman reported failed assertions. See the HTML report."
+          exit 1
